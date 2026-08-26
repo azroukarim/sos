@@ -28,10 +28,16 @@ python3 /tmp/get-pip.py
 pip3 install cython
 
 
+
+
+
+
 الخطوة 3: حل مشكلة المترجم المفقودة (المكتبة الوهمية)
 هذا الأمر يحل مشكلة الربط -latomic_asneeded الشهيرة في صور Enigma2 ويصلحها تلقائياً سواء كان اسم المترجم gcc أو arm-oe-linux-gnueabi-gcc:
 
 echo "" | arm-oe-linux-gnueabi-gcc -shared -x c - -o /usr/lib/libatomic_asneeded.so || echo "" | gcc -shared -x c - -o /usr/lib/libatomic_asneeded.so
+
+
 
 
 
