@@ -91,7 +91,7 @@ if result.returncode == 0:
     print("Compilation successful! Cleaning up source files...")
     if os.path.exists('setup.py'):
         os.remove('setup.py')
-        
+
     for root, dirs, files in os.walk('.'):
         for file in files:
             file_path = os.path.join(root, file)
@@ -99,7 +99,7 @@ if result.returncode == 0:
                 os.remove(file_path)
             elif file.endswith('.c'):
                 os.remove(file_path)
-                
+
     if os.path.exists('build'):
         shutil.rmtree('build')
     print("Compilation and cleanup complete!")
