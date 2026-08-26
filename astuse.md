@@ -1,5 +1,5 @@
-
-1
+----
+### 1
 
 python3 << 'PYEOF'
 file = '/usr/lib/enigma2/python/Plugins/Extensions/XPortal/provider_selection.py'
@@ -14,9 +14,9 @@ for i, line in enumerate(lines):
 open(file, 'w').writelines(new_lines)
 print("Done! File fixed.")
 PYEOF
---------------------------------------------------------------------------
-2
 
+
+### 2
 /tmp/compile_tool.sh
 
 -------------------------
