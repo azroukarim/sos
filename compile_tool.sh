@@ -1,22 +1,36 @@
-cat << 'EOF' > /tmp/compile_tool.sh
 #!/bin/sh
 
-PLUGIN_NAME=$1
+# ترحيب وطلب مسار البلوجين
+echo "=================================================="
+echo "    Enigma2 Plugins Cython Compiler Tool"
+echo "=================================================="
+echo -n "Please enter the plugin folder name or full path: "
+read USER_INPUT
 
-# التحقق من إدخال اسم البلوجين
-if [ -z "$PLUGIN_NAME" ]; then
-    echo "Usage: $0 <plugin_folder_name>"
-    echo "Example: $0 XPortal"
+# تنظيف المدخلات من الفراغات
+USER_INPUT=$(echo "$USER_INPUT" | xargs)
+
+if [ -z "$USER_INPUT" ]; then
+    echo "Error: No plugin folder or path entered."
     exit 1
 fi
 
-PLUGIN_DIR="/usr/lib/enigma2/python/Plugins/Extensions/$PLUGIN_NAME"
+# تحديد ما إذا كان المدخل مسار كامل أم مجرد اسم مجلد
+if echo "$USER_INPUT" | grep -q "^/"; then
+    PLUGIN_DIR="$USER_INPUT"
+else
+    PLUGIN_DIR="/usr/lib/enigma2/python/Plugins/Extensions/$USER_INPUT"
+fi
 
 # التحقق من وجود المجلد
 if [ ! -d "$PLUGIN_DIR" ]; then
     echo "Error: Directory $PLUGIN_DIR does not exist."
     exit 1
 fi
+
+echo "=================================================="
+echo "Target Directory: $PLUGIN_DIR"
+echo "=================================================="
 
 echo "=== Step 1: Installing/Checking compiler & python tools ==="
 opkg update
@@ -34,10 +48,10 @@ if [ ! -f /usr/lib/libatomic_asneeded.so ]; then
     echo "" | arm-oe-linux-gnueabi-gcc -shared -x c - -o /usr/lib/libatomic_asneeded.so || echo "" | gcc -shared -x c - -o /usr/lib/libatomic_asneeded.so
 fi
 
-echo "=== Step 4: Compiling plugin: $PLUGIN_NAME ==="
+echo "=== Step 4: Compiling plugin files ==="
 cd "$PLUGIN_DIR"
 
-# إنشاء سكربت التجميع المؤقت داخل مجلد البلوجين
+# إنشاء سكربت التجميع المؤقت
 cat << 'INNER_EOF' > compile_temp.py
 import os
 import shutil
@@ -102,4 +116,3 @@ echo "=== Step 5: Restarting Enigma2 ==="
 echo "Restarting GUI in 3 seconds..."
 sleep 3
 killall -9 enigma2
-EOF
