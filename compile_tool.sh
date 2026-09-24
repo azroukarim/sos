@@ -1,6 +1,6 @@
 #!/bin/sh
 
-VERSION="v4.5"
+VERSION="v4.6"
 
 echo "=================================================="
 echo "   Enigma2 Plugins Cython Compiler $VERSION"
@@ -339,6 +339,15 @@ setup_content = (
     "from Cython.Build import cythonize\n"
     "import sysconfig\n"
     "\n"
+    "# force SERIAL extension builds: the setuptools parallel pool can\n"
+    "# drop intermediate .o object files on slow / low-RAM boxes when\n"
+    "# many extensions are built at once (seen on Vu+-style images)\n"
+    "try:\n"
+    "    from setuptools.command.build_ext import build_ext as _st_be\n"
+    "    _st_be.parallel = None\n"
+    "except Exception:\n"
+    "    pass\n"
+    "\n"
     "# strip the phantom -latomic_asneeded flag some images inject\n"
     "# (patch EVERY config var - it may live in LIBS/SYSLIBS/etc.)\n"
     "config_vars = sysconfig.get_config_vars()\n"
@@ -367,6 +376,12 @@ with open(setup_path, 'w') as f:
 # 4) Run the build (output streamed to console AND the log)
 # ---------------------------------------------------------------
 log_line("Starting Cython compilation...")
+try:
+    _v = os.statvfs(target)
+    _free_mb = _v.f_bavail * _v.f_frsize / 1048576.0
+    log_line("[disk] free space on target filesystem: %.0f MB" % _free_mb)
+except Exception:
+    pass
 cmd = [sys.executable, 'setup.py', 'build_ext', '--inplace']
 proc = subprocess.Popen(cmd, cwd=target, stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT, universal_newlines=True)
@@ -384,6 +399,12 @@ if rc != 0:
     log_line("")
     log_line("COMPILATION FAILED - original .py files were NOT deleted.")
     log_line("Backup still available at: %s" % backup_root)
+    try:
+        _v = os.statvfs(target)
+        _free_mb = _v.f_bavail * _v.f_frsize / 1048576.0
+        log_line("[disk] free space at failure: %.0f MB" % _free_mb)
+    except Exception:
+        pass
     # remove generated .c files only, keep every .py intact
     for r, files in walk('.'):
         for f in files:
