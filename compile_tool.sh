@@ -1,6 +1,6 @@
 #!/bin/sh
 
-VERSION="v4.1"
+VERSION="v4.2"
 
 echo "=================================================="
 echo "   Enigma2 Plugins Cython Compiler $VERSION"
@@ -104,14 +104,39 @@ if ! command -v "$PIPCMD" >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------
-# 5) Install Cython (0.29.36 first: works on Py2 *and* Py3)
+# 5) Install Cython - choose the right version for the Python:
+#    - Python 3.12+ (e.g. 3.14 on new Vu+/OpenATV images) NEEDS a
+#      recent Cython; 0.29.x generates C incompatible with 3.14
+#      headers ("_PyLong_AsByteArray ... expected 6, have 5").
+#    - Old Python 2.7 / 3.5 images must use 0.29.36 instead.
 # ---------------------------------------------------------------
 echo ""
 echo "=== Step 3: Installing Cython ==="
-"$PIPCMD" install --no-cache-dir cython==0.29.36 2>&1 | tail -n 2
-if ! "$PYTHON" -c "import Cython" >/dev/null 2>&1; then
-    echo "[i] Cython 0.29.36 failed on this image - trying latest..."
-    "$PIPCMD" install --no-cache-dir cython 2>&1 | tail -n 2
+
+PY_MAJOR=$("$PYTHON" -c 'import sys; print(sys.version_info[0])' 2>/dev/null)
+PY_MINOR=$("$PYTHON" -c 'import sys; print(sys.version_info[1])' 2>/dev/null)
+
+NEED_NEW_CYTHON=0
+if [ "$LANG_LEVEL" = "3" ]; then
+    if [ -n "$PY_MAJOR" ] && [ "$PY_MAJOR" -ge 3 ] && [ -n "$PY_MINOR" ] && [ "$PY_MINOR" -ge 12 ]; then
+        NEED_NEW_CYTHON=1
+    fi
+fi
+
+if [ "$NEED_NEW_CYTHON" = "1" ]; then
+    echo "[i] Python $PY_MAJOR.$PY_MINOR detected -> installing latest Cython..."
+    "$PIPCMD" install --no-cache-dir -U cython 2>&1 | tail -n 3
+    if ! "$PYTHON" -c "import Cython" >/dev/null 2>&1; then
+        echo "[i] Latest Cython failed -> trying 0.29.36..."
+        "$PIPCMD" install --no-cache-dir cython==0.29.36 2>&1 | tail -n 3
+    fi
+else
+    echo "[i] Standard/old Python detected -> installing Cython 0.29.36..."
+    "$PIPCMD" install --no-cache-dir cython==0.29.36 2>&1 | tail -n 3
+    if ! "$PYTHON" -c "import Cython" >/dev/null 2>&1; then
+        echo "[i] Cython 0.29.36 failed on this image - trying latest..."
+        "$PIPCMD" install --no-cache-dir cython 2>&1 | tail -n 3
+    fi
 fi
 
 if ! "$PYTHON" -c "import Cython" >/dev/null 2>&1; then
