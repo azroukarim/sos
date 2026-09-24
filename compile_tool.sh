@@ -1,6 +1,6 @@
 #!/bin/sh
 
-VERSION="v4.3"
+VERSION="v4.4"
 
 echo "=================================================="
 echo "   Enigma2 Plugins Cython Compiler $VERSION"
@@ -147,26 +147,50 @@ fi
 "$PYTHON" -c "import Cython; print('Cython version:', Cython.__version__)"
 
 # ---------------------------------------------------------------
-# 6) Fix libatomic (needed by some images at link time)
-#    Some images inject a phantom flag "-latomic_asneeded" that
-#    points to a library that does not exist at link time.
+# 6) Fix libatomic as-needed (phantom "-latomic_asneeded" flag)
+#    On some OpenATV-style images this flag is NOT in sysconfig but
+#    is injected by the toolchain itself at link time, so we must
+#    BOTH patch sysconfig AND make the name resolvable by ld:
+#    (a) install the real libatomic, (b) drop a resolver stub /
+#        linker script in every likely search dir, (c) show where
+#        the flag actually lives (diagnostics).
 # ---------------------------------------------------------------
 echo ""
 echo "=== Step 4: Fixing libatomic as-needed ==="
-# 1) make sure a real libatomic exists (no-op if already installed)
+
+# --- diagnostics: where does the phantom flag come from? ---
+echo "[dbg] environment variables mentioning atomic:"
+env | grep -i atomic || echo "      (none)"
+"$PYTHON" -c "import sysconfig; [print('     %s = %r' % (k, sysconfig.get_config_var(k))) for k in ('LIBS','SYSLIBS','LDSHARED','LDFLAGS','LINKFORSHARED')]" 2>/dev/null || true
+GCCBIN="$(command -v arm-oe-linux-gnueabi-gcc 2>/dev/null)"
+if [ -z "$GCCBIN" ]; then GCCBIN="$(command -v gcc 2>/dev/null)"; fi
+if [ -n "$GCCBIN" ] && head -c 2 "$GCCBIN" 2>/dev/null | grep -q '#!'; then
+    echo "[dbg] $GCCBIN is a wrapper script - its first lines:"
+    head -n 6 "$GCCBIN" 2>/dev/null
+fi
+
+# --- 1) make sure a real libatomic exists (no-op if already installed) ---
 if command -v opkg >/dev/null 2>&1; then
-    echo "[i] Ensuring libatomic is available (opkg install libatomic1) ..."
-    opkg install libatomic1 >/dev/null 2>&1
+    echo "[i] Installing libatomic1 (no-op if already present) ..."
+    opkg install libatomic1 2>&1 | tail -n 2
 fi
-# 2) create a stub so the phantom "-latomic_asneeded" name resolves
-if command -v gcc >/dev/null 2>&1; then
-    if echo "" | gcc -shared -x c - -o /usr/lib/libatomic_asneeded.so 2>/dev/null; then
-        echo "[i] Stub /usr/lib/libatomic_asneeded.so created (empty shared lib)"
-    else
-        printf 'INPUT ( -latomic )\n' > /usr/lib/libatomic_asneeded.so
-        echo "[i] Stub /usr/lib/libatomic_asneeded.so created (linker script)"
-    fi
+
+# --- 2) make the phantom "-latomic_asneeded" name resolvable ---
+ATOMIC_REAL="$(ls /usr/lib/libatomic.so* /lib/libatomic.so* 2>/dev/null | grep -v asneeded | head -n1)"
+if [ -n "$ATOMIC_REAL" ]; then
+    ATOMIC_NAME="$(basename "$ATOMIC_REAL")"
+    echo "[i] Real libatomic found: $ATOMIC_NAME"
+    for D in /usr/lib /lib /usr/local/lib; do
+        [ -d "$D" ] && printf 'INPUT ( %s )\n' "$ATOMIC_NAME" > "$D/libatomic_asneeded.so"
+    done
+    echo "[i] Resolver stub libatomic_asneeded.so -> $ATOMIC_NAME"
+else
+    echo "[i] libatomic.so not found - creating an empty stub shared library ..."
+    echo "" | gcc -shared -x c - -o /usr/lib/libatomic_asneeded.so 2>/dev/null
 fi
+
+echo "[verify]"
+ls -l /usr/lib/libatomic_asneeded.so /lib/libatomic_asneeded.so 2>/dev/null || echo "      (no stub present)"
 
 # ---------------------------------------------------------------
 # 7) Python 3 compatibility fix (unichr -> chr) on Py3 only
@@ -275,6 +299,27 @@ with open(os.path.join(backup_root, 'manifest.txt'), 'w') as mf:
 log_line("Backup done (%d file(s))." % len(py_files))
 
 # ---------------------------------------------------------------
+# 2b) Patch the on-disk sysconfigdata so even freshly spawned
+#     interpreters never see the phantom "-latomic_asneeded" flag,
+#     and log exactly which config vars carry any atomic reference.
+# ---------------------------------------------------------------
+import glob as _glob
+import sysconfig as _sc
+for _key, _val in _sc.get_config_vars().items():
+    if isinstance(_val, str) and 'atomic' in _val:
+        log_line("[dbg] sysconfig var %s = %s" % (_key, _val))
+for _p in _glob.glob(os.path.join(os.path.dirname(_sc.__file__), '_sysconfigdata*.py')):
+    try:
+        _s = open(_p, encoding='utf-8').read()
+        if '-latomic_asneeded' in _s:
+            _s2 = _s.replace('-latomic_asneeded', '')
+            if _s2 != _s:
+                open(_p, 'w', encoding='utf-8').write(_s2)
+                log_line("[sysconfigdata] patched: %s" % _p)
+    except Exception as _e:
+        log_line("[sysconfigdata] skip %s (%s)" % (_p, _e))
+
+# ---------------------------------------------------------------
 # 3) Write setup.py
 # ---------------------------------------------------------------
 setup_content = (
@@ -282,13 +327,12 @@ setup_content = (
     "from Cython.Build import cythonize\n"
     "import sysconfig\n"
     "\n"
-    "# strip phantom libatomic flags some images inject\n"
-    "# (on Python 3.12+/3.14 images they live in LIBS / SYSLIBS,\n"
-    "#  not only in LDSHARED/LDFLAGS) - so patch EVERY config var\n"
+    "# strip the phantom -latomic_asneeded flag some images inject\n"
+    "# (patch EVERY config var - it may live in LIBS/SYSLIBS/etc.)\n"
     "config_vars = sysconfig.get_config_vars()\n"
     "for key, val in list(config_vars.items()):\n"
-    "    if isinstance(val, str) and '-latomic' in val:\n"
-    "        newval = val.replace('-latomic_asneeded', '').replace('-latomic', '')\n"
+    "    if isinstance(val, str) and '-latomic_asneeded' in val:\n"
+    "        newval = val.replace('-latomic_asneeded', '')\n"
     "        newval = newval.replace('  ', ' ').strip()\n"
     "        if newval != val:\n"
     "            config_vars[key] = newval\n"
