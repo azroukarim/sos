@@ -1,6 +1,6 @@
 #!/bin/sh
 
-VERSION="v4.4"
+VERSION="v4.5"
 
 echo "=================================================="
 echo "   Enigma2 Plugins Cython Compiler $VERSION"
@@ -176,17 +176,29 @@ if command -v opkg >/dev/null 2>&1; then
 fi
 
 # --- 2) make the phantom "-latomic_asneeded" name resolvable ---
+#      PREFER a linker script pointing at the real libatomic:
+#      it does NOT need any compiler (gcc is often absent from
+#      the PATH on these images - only arm-oe-linux-gnueabi-gcc).
 ATOMIC_REAL="$(ls /usr/lib/libatomic.so* /lib/libatomic.so* 2>/dev/null | grep -v asneeded | head -n1)"
 if [ -n "$ATOMIC_REAL" ]; then
     ATOMIC_NAME="$(basename "$ATOMIC_REAL")"
-    echo "[i] Real libatomic found: $ATOMIC_NAME"
     for D in /usr/lib /lib /usr/local/lib; do
         [ -d "$D" ] && printf 'INPUT ( %s )\n' "$ATOMIC_NAME" > "$D/libatomic_asneeded.so"
     done
-    echo "[i] Resolver stub libatomic_asneeded.so -> $ATOMIC_NAME"
+    echo "[i] Resolver stub libatomic_asneeded.so -> $ATOMIC_NAME  (linker script, no compiler needed)"
 else
-    echo "[i] libatomic.so not found - creating an empty stub shared library ..."
-    echo "" | gcc -shared -x c - -o /usr/lib/libatomic_asneeded.so 2>/dev/null
+    # no real libatomic - build an empty stub with the IMAGE's toolchain cc
+    PYCC="$("$PYTHON" -c "import sysconfig; print(sysconfig.get_config_var('CC') or '')" 2>/dev/null)"
+    CC_BIN=""
+    for c in "$PYCC" arm-oe-linux-gnueabi-gcc gcc cc; do
+        if [ -n "$c" ] && command -v "$c" >/dev/null 2>&1; then CC_BIN="$(command -v "$c")"; break; fi
+    done
+    if [ -n "$CC_BIN" ]; then
+        echo "[i] libatomic.so not found - building empty stub with: $CC_BIN"
+        echo "" | "$CC_BIN" -shared -x c - -o /usr/lib/libatomic_asneeded.so 2>/dev/null
+    else
+        echo "[i] no compiler found - cannot build stub"
+    fi
 fi
 
 echo "[verify]"
