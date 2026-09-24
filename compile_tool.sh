@@ -1,6 +1,6 @@
 #!/bin/sh
 
-VERSION="v4.2"
+VERSION="v4.3"
 
 echo "=================================================="
 echo "   Enigma2 Plugins Cython Compiler $VERSION"
@@ -148,11 +148,24 @@ fi
 
 # ---------------------------------------------------------------
 # 6) Fix libatomic (needed by some images at link time)
+#    Some images inject a phantom flag "-latomic_asneeded" that
+#    points to a library that does not exist at link time.
 # ---------------------------------------------------------------
 echo ""
 echo "=== Step 4: Fixing libatomic as-needed ==="
+# 1) make sure a real libatomic exists (no-op if already installed)
+if command -v opkg >/dev/null 2>&1; then
+    echo "[i] Ensuring libatomic is available (opkg install libatomic1) ..."
+    opkg install libatomic1 >/dev/null 2>&1
+fi
+# 2) create a stub so the phantom "-latomic_asneeded" name resolves
 if command -v gcc >/dev/null 2>&1; then
-    echo "" | gcc -shared -x c - -o /usr/lib/libatomic_asneeded.so 2>/dev/null
+    if echo "" | gcc -shared -x c - -o /usr/lib/libatomic_asneeded.so 2>/dev/null; then
+        echo "[i] Stub /usr/lib/libatomic_asneeded.so created (empty shared lib)"
+    else
+        printf 'INPUT ( -latomic )\n' > /usr/lib/libatomic_asneeded.so
+        echo "[i] Stub /usr/lib/libatomic_asneeded.so created (linker script)"
+    fi
 fi
 
 # ---------------------------------------------------------------
@@ -269,11 +282,17 @@ setup_content = (
     "from Cython.Build import cythonize\n"
     "import sysconfig\n"
     "\n"
-    "# strip the -latomic_asneeded flag some images inject\n"
+    "# strip phantom libatomic flags some images inject\n"
+    "# (on Python 3.12+/3.14 images they live in LIBS / SYSLIBS,\n"
+    "#  not only in LDSHARED/LDFLAGS) - so patch EVERY config var\n"
     "config_vars = sysconfig.get_config_vars()\n"
-    "for key in ('LDSHARED', 'LDFLAGS', 'CCSSHARED', 'LDSHAREDXX'):\n"
-    "    if key in config_vars and isinstance(config_vars[key], str):\n"
-    "        config_vars[key] = config_vars[key].replace('-latomic_asneeded', '')\n"
+    "for key, val in list(config_vars.items()):\n"
+    "    if isinstance(val, str) and '-latomic' in val:\n"
+    "        newval = val.replace('-latomic_asneeded', '').replace('-latomic', '')\n"
+    "        newval = newval.replace('  ', ' ').strip()\n"
+    "        if newval != val:\n"
+    "            config_vars[key] = newval\n"
+    "            print('[libatomic fix] patched sysconfig var: %%s' %% key)\n"
     "\n"
     "py_files = %r\n" % py_files
 )
