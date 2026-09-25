@@ -1,6 +1,6 @@
 #!/bin/sh
 
-VERSION="v4.8"
+VERSION="v4.9"
 
 echo "=================================================="
 echo "   Enigma2 Plugins Cython Compiler $VERSION"
@@ -317,6 +317,12 @@ for p in py_files:
     log_line("  -> %s" % p)
 
 if not py_files:
+    _any_so = any(f.endswith('.so') for _r, _fs in walk('.') for f in _fs)
+    if _any_so:
+        log_line("All modules are already compiled to .so - nothing to do.")
+        log_line("The plugin is ready. Restart Enigma2 to load the .so files.")
+        log.close()
+        sys.exit(0)
     log_line("No Python files found! Aborting (nothing was deleted).")
     log.close()
     sys.exit(1)
