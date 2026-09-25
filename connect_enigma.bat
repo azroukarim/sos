@@ -59,9 +59,9 @@ echo.
 if "%CHOICE%"=="2" goto show_restore
 
 echo    [curl version]
-echo        curl -kLs %BASE_URL%/compile_tool.sh -o /tmp/compile_tool.sh ^&^& /bin/sh /tmp/compile_tool.sh
+echo        curl -kLs %BASE_URL%/compile_tool.sh -o /tmp/compile_tool.sh ^&^& sed -i 's/\r$//' /tmp/compile_tool.sh ^&^& /bin/sh /tmp/compile_tool.sh
 echo    [wget version - if curl is missing on the box]
-echo        wget --no-check-certificate %BASE_URL%/compile_tool.sh -O /tmp/compile_tool.sh ^&^& /bin/sh /tmp/compile_tool.sh
+echo        wget --no-check-certificate %BASE_URL%/compile_tool.sh -O /tmp/compile_tool.sh ^&^& sed -i 's/\r$//' /tmp/compile_tool.sh ^&^& /bin/sh /tmp/compile_tool.sh
 echo.
 echo 3- The tool will then ask for the plugin name -
 echo    type: %PLUGIN_NAME%
@@ -71,20 +71,20 @@ goto make_clip
 
 :show_restore
 echo    [curl version]
-echo        curl -kLs %BASE_URL%/restore_backup.sh -o /tmp/restore_backup.sh ^&^& /bin/sh /tmp/restore_backup.sh "%PLUGIN_NAME%"
+echo        curl -kLs %BASE_URL%/restore_backup.sh -o /tmp/restore_backup.sh ^&^& sed -i 's/\r$//' /tmp/restore_backup.sh ^&^& /bin/sh /tmp/restore_backup.sh "%PLUGIN_NAME%"
 echo    [wget version - if curl is missing on the box]
-echo        wget --no-check-certificate %BASE_URL%/restore_backup.sh -O /tmp/restore_backup.sh ^&^& /bin/sh /tmp/restore_backup.sh "%PLUGIN_NAME%"
+echo        wget --no-check-certificate %BASE_URL%/restore_backup.sh -O /tmp/restore_backup.sh ^&^& sed -i 's/\r$//' /tmp/restore_backup.sh ^&^& /bin/sh /tmp/restore_backup.sh "%PLUGIN_NAME%"
 echo.
 echo 3- Restores the original .py files from the backup.
 goto make_clip
 
 :make_clip
 if "%CHOICE%"=="2" goto clip_restore
-> "%TEMP%\e2cc_cmd.txt" echo curl -kLs %BASE_URL%/compile_tool.sh -o /tmp/compile_tool.sh ^&^& /bin/sh /tmp/compile_tool.sh
+> "%TEMP%\e2cc_cmd.txt" echo curl -kLs %BASE_URL%/compile_tool.sh -o /tmp/compile_tool.sh ^&^& sed -i 's/\r$//' /tmp/compile_tool.sh ^&^& /bin/sh /tmp/compile_tool.sh
 goto clip_done
 
 :clip_restore
-> "%TEMP%\e2cc_cmd.txt" echo curl -kLs %BASE_URL%/restore_backup.sh -o /tmp/restore_backup.sh ^&^& /bin/sh /tmp/restore_backup.sh "%PLUGIN_NAME%"
+> "%TEMP%\e2cc_cmd.txt" echo curl -kLs %BASE_URL%/restore_backup.sh -o /tmp/restore_backup.sh ^&^& sed -i 's/\r$//' /tmp/restore_backup.sh ^&^& /bin/sh /tmp/restore_backup.sh "%PLUGIN_NAME%"
 
 :clip_done
 clip < "%TEMP%\e2cc_cmd.txt"

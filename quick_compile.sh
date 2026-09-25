@@ -29,6 +29,8 @@ download() {
         echo "Download of $1 failed! Check internet connection."
         exit 1
     fi
+    # strip any Windows CRLF line endings (the box's /bin/sh breaks on \r)
+    sed -i 's/\r$//' "/tmp/$1" 2>/dev/null
 }
 
 if [ "$MODE" = "restore" ]; then
