@@ -1,6 +1,6 @@
 #!/bin/sh
 
-VERSION="v4.7"
+VERSION="v4.8"
 
 echo "=================================================="
 echo "   Enigma2 Plugins Cython Compiler $VERSION"
@@ -266,6 +266,37 @@ def makedirs(path):
     except OSError:
         pass
 
+def relocate_all():
+    """Move every compiled .so right next to its original .py file.
+    Used on success (normal placement) AND on failure (salvage what
+    was already built so the next run resumes instead of restarting)."""
+    wanted = {}
+    for rel in all_py:
+        d = os.path.normpath(os.path.dirname(rel)) or '.'
+        leaf = os.path.splitext(os.path.basename(rel))[0]
+        if leaf not in wanted:
+            wanted[leaf] = d
+    moved = 0
+    for r, files in walk('.'):
+        for f in files:
+            if not f.endswith('.so'):
+                continue
+            cur = os.path.normpath(os.path.join(r, f))
+            leaf = f[:-3]
+            if '.' in leaf:
+                leaf = leaf.split('.')[0]
+            if leaf not in wanted:
+                continue
+            dest = os.path.normpath(os.path.join(wanted[leaf], f))
+            if dest != cur:
+                try:
+                    shutil.move(cur, dest)
+                    moved += 1
+                    log_line("  relocated %s -> %s" % (cur, dest))
+                except OSError as e:
+                    log_line("  relocate failed %s (%s)" % (cur, e))
+    return moved
+
 log_line("=== Enigma2 Cython Compile Log ===")
 log_line("Time:            %s" % time.asctime())
 log_line("Target:          %s" % target)
@@ -291,6 +322,30 @@ if not py_files:
     sys.exit(1)
 
 # ---------------------------------------------------------------
+# 1b) Resume support: skip modules that already have a FRESH .so
+#     (built after their .py - either now or in a previous partial
+#     run). Their .py are kept + backed up, and only removed on the
+#     final success so nothing is ever lost mid-way.
+# ---------------------------------------------------------------
+all_py = list(py_files)
+todo = []
+skipped = []
+for rel in py_files:
+    d = os.path.normpath(os.path.dirname(rel)) or '.'
+    leaf = os.path.splitext(os.path.basename(rel))[0]
+    hits = [f for f in os.listdir(d)
+            if f.startswith(leaf + '.') and f.endswith('.so')]
+    if hits and os.path.getmtime(os.path.join(d, hits[0])) > os.path.getmtime(rel):
+        skipped.append(rel)
+    else:
+        todo.append(rel)
+if skipped:
+    log_line("Resuming: skipping %d already-compiled file(s):" % len(skipped))
+    for s in skipped:
+        log_line("  (skip) %s" % s)
+py_files = todo
+
+# ---------------------------------------------------------------
 # 2) Backup originals BEFORE touching anything
 # ---------------------------------------------------------------
 backup_root = os.path.join(target, BACKUP_DIR)
@@ -299,16 +354,16 @@ if os.path.exists(backup_root):
 makedirs(backup_root)
 
 log_line("Backing up originals to %s ..." % backup_root)
-for rel in py_files:
+for rel in all_py:
     dest = os.path.join(backup_root, rel)
     makedirs(os.path.dirname(dest))
     shutil.copy2(rel, dest)
 
 with open(os.path.join(backup_root, 'manifest.txt'), 'w') as mf:
     mf.write("Backup created: %s\n" % time.asctime())
-    for rel in py_files:
+    for rel in all_py:
         mf.write(rel + "\n")
-log_line("Backup done (%d file(s))." % len(py_files))
+log_line("Backup done (%d file(s))." % len(all_py))
 
 # ---------------------------------------------------------------
 # 2b) Patch the on-disk sysconfigdata so even freshly spawned
@@ -368,37 +423,39 @@ setup_content += (
     ")\n" % lang_level
 )
 
-setup_path = os.path.join(target, 'setup.py')
-with open(setup_path, 'w') as f:
-    f.write(setup_content)
+if py_files:
+    setup_path = os.path.join(target, 'setup.py')
+    with open(setup_path, 'w') as f:
+        f.write(setup_content)
 
-# ---------------------------------------------------------------
-# 4) Run the build (output streamed to console AND the log)
-# ---------------------------------------------------------------
-log_line("Starting Cython compilation...")
-try:
-    _v = os.statvfs(target)
-    _free_mb = _v.f_bavail * _v.f_frsize / 1048576.0
-    log_line("[disk] free space on target filesystem: %.0f MB" % _free_mb)
-except Exception:
-    pass
-# NOTE: no --inplace here. setuptools' inplace copy resolves package paths
-# relative to the CWD at the plugins ROOT (Plugins/...), but we build with
-# CWD = the plugin folder, so it would try to write a NESTED
-# Plugins/Extensions/XPortal/... tree and fail. We build into build/ and
-# let Step 5 relocate every .so right next to its original .py file.
-cmd = [sys.executable, 'setup.py', 'build_ext']
-proc = subprocess.Popen(cmd, cwd=target, stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT, universal_newlines=True)
-for line in iter(proc.stdout.readline, ''):
-    log_line(line.rstrip('\n'))
-proc.wait()
-rc = proc.returncode
+    log_line("Starting Cython compilation...")
+    try:
+        _v = os.statvfs(target)
+        _free_mb = _v.f_bavail * _v.f_frsize / 1048576.0
+        log_line("[disk] free space on target filesystem: %.0f MB" % _free_mb)
+    except Exception:
+        pass
+    # NOTE: no --inplace here. setuptools' inplace copy resolves package paths
+    # relative to the CWD at the plugins ROOT (Plugins/...), but we build with
+    # CWD = the plugin folder, so it would try to write a NESTED
+    # Plugins/Extensions/XPortal/... tree and fail. We build into build/ and
+    # let relocate_all() place every .so right next to its original .py.
+    cmd = [sys.executable, 'setup.py', 'build_ext']
+    proc = subprocess.Popen(cmd, cwd=target, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, universal_newlines=True)
+    for line in iter(proc.stdout.readline, ''):
+        log_line(line.rstrip('\n'))
+    proc.wait()
+    rc = proc.returncode
 
-try:
-    os.remove(setup_path)
-except OSError:
-    pass
+    try:
+        os.remove(setup_path)
+    except OSError:
+        pass
+else:
+    log_line("Nothing to build - all %d file(s) already have a fresh .so."
+             % len(all_py))
+    rc = 0
 
 if rc != 0:
     log_line("")
@@ -410,6 +467,11 @@ if rc != 0:
         log_line("[disk] free space at failure: %.0f MB" % _free_mb)
     except Exception:
         pass
+    # SALVAGE: keep whatever .so were already built so the NEXT run
+    # resumes from work-in-progress instead of starting over.
+    _saved = relocate_all()
+    log_line("Saved %d already-built module(s) - the next run resumes from here."
+             % _saved)
     # remove generated .c files only, keep every .py intact
     for r, files in walk('.'):
         for f in files:
@@ -426,38 +488,15 @@ if rc != 0:
     sys.exit(1)
 
 # ---------------------------------------------------------------
-# 5) Relocate any misplaced .so (some images put them in a nested
-#    folder named after the plugin, e.g. XPortal/XPortal/plugin.so).
-#    We force every .so to sit right next to its original .py file.
+# 5) Relocate every compiled .so right next to its original .py
+#    (also fixes the nested XPortal/XPortal/... folder issue seen in
+#    the old --inplace flow).
 # ---------------------------------------------------------------
-wanted = {}
-for rel in py_files:
-    d = os.path.normpath(os.path.dirname(rel)) or '.'
-    leaf = os.path.splitext(os.path.basename(rel))[0]
-    if leaf not in wanted:
-        wanted[leaf] = d
-
-for r, files in walk('.'):
-    for f in files:
-        if not f.endswith('.so'):
-            continue
-        cur = os.path.normpath(os.path.join(r, f))
-        leaf = f[:-3]
-        if '.' in leaf:
-            leaf = leaf.split('.')[0]
-        if leaf not in wanted:
-            continue
-        dest = os.path.normpath(os.path.join(wanted[leaf], f))
-        if dest != cur:
-            try:
-                shutil.move(cur, dest)
-                log_line("  relocated %s -> %s" % (cur, dest))
-            except OSError as e:
-                log_line("  relocate failed %s (%s)" % (cur, e))
+relocate_all()
 
 # verify every original .py has a matching .so next to it now
 missing = []
-for rel in py_files:
+for rel in all_py:
     d = os.path.normpath(os.path.dirname(rel)) or '.'
     leaf = os.path.splitext(os.path.basename(rel))[0]
     hits = [f for f in os.listdir(d) if f.startswith(leaf + '.') and f.endswith('.so')]
