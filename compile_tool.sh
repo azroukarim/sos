@@ -1,6 +1,6 @@
 #!/bin/sh
 
-VERSION="v4.6"
+VERSION="v4.7"
 
 echo "=================================================="
 echo "   Enigma2 Plugins Cython Compiler $VERSION"
@@ -382,7 +382,12 @@ try:
     log_line("[disk] free space on target filesystem: %.0f MB" % _free_mb)
 except Exception:
     pass
-cmd = [sys.executable, 'setup.py', 'build_ext', '--inplace']
+# NOTE: no --inplace here. setuptools' inplace copy resolves package paths
+# relative to the CWD at the plugins ROOT (Plugins/...), but we build with
+# CWD = the plugin folder, so it would try to write a NESTED
+# Plugins/Extensions/XPortal/... tree and fail. We build into build/ and
+# let Step 5 relocate every .so right next to its original .py file.
+cmd = [sys.executable, 'setup.py', 'build_ext']
 proc = subprocess.Popen(cmd, cwd=target, stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT, universal_newlines=True)
 for line in iter(proc.stdout.readline, ''):
@@ -449,6 +454,19 @@ for r, files in walk('.'):
                 log_line("  relocated %s -> %s" % (cur, dest))
             except OSError as e:
                 log_line("  relocate failed %s (%s)" % (cur, e))
+
+# verify every original .py has a matching .so next to it now
+missing = []
+for rel in py_files:
+    d = os.path.normpath(os.path.dirname(rel)) or '.'
+    leaf = os.path.splitext(os.path.basename(rel))[0]
+    hits = [f for f in os.listdir(d) if f.startswith(leaf + '.') and f.endswith('.so')]
+    if not hits:
+        missing.append(rel)
+if missing:
+    log_line("WARNING: no .so produced for:")
+    for m in missing:
+        log_line("  MISSING %s" % m)
 
 # ---------------------------------------------------------------
 # 6) Success: remove compiled .py and .c (originals stay in backup)
