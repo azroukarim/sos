@@ -1,13 +1,21 @@
-1###
- send to path files plug
+#####  install  
+pip install cython
+
+opkg install python3-cython
+
+
+
+
+
+### send to path files plug
 https://raw.githubusercontent.com/azroukarim/sos/refs/heads/main/setup_universal.py
 
-2### send to telnet 
+### send to telnet 
 
 cd /usr/lib/enigma2/python/Plugins/Extensions/XPortal
 python setup_universal.py
 
-3###
+###
 
 
 killall -9 enigma2
